@@ -1,0 +1,49 @@
+# Data settings
+data:
+  num_workers: 5
+  train_batch_size: 4
+  val_batch_size: 6
+  num_samples: 8
+  interval: 16
+  data_path: /irip/yangruijie_2019/tanlingfeng/data/ff++/frames
+  list_path: datasets/ffpp
+  img_quality: LQ
+  img_size: 288
+  random_sample: True
+
+
+# Training settings
+training:
+  resume: logs/F3Net/LQ/lightning_logs/version_5847/checkpoints/val_acc-epoch_000-loss_0.426-acc_0.88881-auc_0.91709.ckpt
+  save_dir: logs/
+  precision: 32
+  num_epochs: 50
+  grad_accumulate: 1
+  early_stop_patience: 10
+  val_interval: 1
+  log_interval: 30
+  clip_grad_val: 5.0
+  optim:
+    # choose 'adam' or 'sgd'
+    optimizer: adam
+    lr: 2.0e-4
+    min_lr: 2.0e-6
+    weight_decay: 0.01
+    eps: 1.0e-8
+    # eps: 1.0e-3
+    momentum: 0.9
+
+    sche:
+      # choose 'plateau' or 'step' or 'cosine'
+      sche_type: plateau
+      # used for 'step'
+      decay_epochs: 5
+      gamma: 0.3
+      # used for 'plateau'
+      patience_epochs: 2
+      factor: 0.3
+  
+  # Model settings
+  model:
+    model_name: F3Net
+    num_classes: 2

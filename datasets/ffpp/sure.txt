@@ -1,0 +1,4 @@
+420_257 Face2Face 64
+701 Original 0
+012_026 Deepfakes 0
+176_190 NeuralTextures 80

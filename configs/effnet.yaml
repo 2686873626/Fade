@@ -1,0 +1,52 @@
+# Data settings
+data:
+  num_workers: 4
+  train_batch_size: 2
+  val_batch_size: 7
+  num_samples: 8
+  data_path: /irip/yangruijie_2019/tanlingfeng/data/ff++/frames
+  list_path: datasets/ffpp
+  img_quality: HQ
+  img_size: 320
+  random_sample: True
+  aug:
+    flip: 0.0
+    # define your cutout scale
+    # erase: [0.05, 0.2]
+    erase: [0.0, 0.0]
+
+
+# Training settings
+training:
+  resume: none
+  save_dir: logs/
+  precision: 32
+  num_epochs: 30
+  grad_accumulate: 1
+  early_stop_patience: 10
+  val_interval: 1
+  log_interval: 30
+  clip_grad_val: 5.0
+  optim:
+    # choose 'adam' or 'sgd'
+    optimizer: adam
+    lr: 2.0e-4
+    min_lr: 2.0e-6
+    weight_decay: 0.01
+    eps: 1.0e-8
+    momentum: 0.9
+
+    sche:
+      # choose 'plateau' or 'step' or 'cosine'
+      sche_type: plateau
+      # used for 'step'
+      decay_epochs: 5
+      gamma: 0.3
+      # used for 'plateau'
+      patience_epochs: 2
+      factor: 0.3
+  
+  # Model settings
+  model:
+    model_name: V2G
+    num_classes: 2
