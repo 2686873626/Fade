@@ -75,8 +75,9 @@ class V2G(nn.Module):
         """V2G forward
 
         Args:
-            x (FloatTensor): BxCxHxW
-            rois (FloatTensor): (B*5)*5, areas including whole face, left eye, right eye, nose and mouth
+            x (FloatTensor): (B * T) * C * H * W
+            rois (FloatTensor): (B * T * count_areas) * 5, areas including whole face, left eye, right eye, left_cheek, right_cheek, nose and mouth
+                                [frame idx, x1, y1, x2, y2]
 
         Returns:
             FloatTensor: video-level predictions 
@@ -89,7 +90,7 @@ class V2G(nn.Module):
         x0 = F.adaptive_avg_pool2d(x, (1, 1)).flatten(1)
         x = self.roi(x, rois).flatten(1)
         
-        x = x.view(B//8, 40, -1)
+        x = x.view(B // 8, 40, -1)
         x1 = self.gcn1(x, self.forward_mat)
         x2 = self.gcn2(x, self.backward_mat)
         x3 = self.gcn3(x)

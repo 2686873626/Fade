@@ -31,11 +31,11 @@ def get_sim_adj_mat(x):
     return mat
 
 
-def get_temp_adj_mat(vertex_num, group_size=5):
+def get_temp_adj_mat(vertex_num, num_nodes=5):
     """
     Args:
         vertex_num (int): noted as N
-        group_size (int, optional): vertex number in one frame. Defaults to 5.
+        num_nodes (int, optional): vertex number in one frame. Defaults to 5.
 
     Returns:
         FloatTensor: adjacent matrix, N*N
@@ -49,43 +49,43 @@ def get_temp_adj_mat(vertex_num, group_size=5):
             if i==j:
                 # self loop removed
                 mat[i][j]=0.
-            elif i//group_size==j//group_size:
+            elif i//num_nodes==j//num_nodes:
                 # same frame
                 mat[i][j]=1.
-            elif j//group_size-1==i//group_size:
+            elif j//num_nodes-1==i//num_nodes:
                 # next frame
                 mat[i][j]=1.
 
     # remove the edges between eyes and mouths
-    for i in range(vertex_num//group_size):
-        for j in range(vertex_num//group_size):
+    for i in range(vertex_num//num_nodes):
+        for j in range(vertex_num//num_nodes):
             if i==j:
-                mat[i*group_size+1][j*group_size+4]=0.
-                mat[i*group_size+2][j*group_size+4]=0.
-                mat[i*group_size+4][j*group_size+1]=0.
-                mat[i*group_size+4][j*group_size+2]=0.
+                mat[i*num_nodes+1][j*num_nodes+4]=0.
+                mat[i*num_nodes+2][j*num_nodes+4]=0.
+                mat[i*num_nodes+4][j*num_nodes+1]=0.
+                mat[i*num_nodes+4][j*num_nodes+2]=0.
             elif j-i==1:
-                mat[i*group_size+1][j*group_size+4]=0.
-                mat[i*group_size+2][j*group_size+4]=0.
-                mat[i*group_size+4][j*group_size+1]=0.
-                mat[i*group_size+4][j*group_size+2]=0.
+                mat[i*num_nodes+1][j*num_nodes+4]=0.
+                mat[i*num_nodes+2][j*num_nodes+4]=0.
+                mat[i*num_nodes+4][j*num_nodes+1]=0.
+                mat[i*num_nodes+4][j*num_nodes+2]=0.
     
     # norm
     mat = mat/mat.sum(dim=1, keepdim=True)
     return mat
 
 
-def get_basic_patterns(group_size=5, num_basic=2):
+def get_basic_patterns(num_nodes=5, num_basic=2):
     """Set the basic action patterns
 
     Args:
-        group_size (int, optional): the vertex count in one frame. Defaults to 5.
+        num_nodes (int, optional): the vertex count in one frame. Defaults to 5.
 
     Returns:
-        Tensor: HxNxN
+        Tensor: num_basic * num_nodes * num_nodes
     """        
-    template = torch.zeros(num_basic, group_size, group_size)
-    if 5==group_size:
+    template = torch.zeros(num_basic, num_nodes, num_nodes)
+    if num_nodes == 5:
         # neutral face
         template[0] = torch.tensor([
             [1.0, 1.0, 0.0, 0.0, 1.0],
@@ -118,7 +118,7 @@ def get_basic_patterns(group_size=5, num_basic=2):
             [0.0, 0.0, 1.0, 1.0, 1.0],
             [1.0, 1.0, 1.0, 1.0, 1.0],
         ])
-    if 7==group_size:
+    if num_nodes == 7:
         # neural face
         template[0] = torch.tensor([
             [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
@@ -170,14 +170,15 @@ def get_basic_patterns(group_size=5, num_basic=2):
             [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
         ])
 
-    template[-1] = torch.eye(group_size)
+    template[-1] = torch.eye(num_nodes)
 
     return template
 
 
 class SepConv(torch.nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=0, dilation=1, bias=False):
-        """Seperable Convolution
+        """
+        Separable Convolution
 
         Args:
             in_channels (int): _description_

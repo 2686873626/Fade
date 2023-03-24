@@ -126,13 +126,14 @@ class Model(pl.LightningModule):
 
     def batch_preprocess(self, batch):
         inputs, labels, rois = batch
+        # inputs: batch, frame number of sequence, channel, height, width
         B, T, C, H, W = inputs.shape
-        inputs = inputs.view(B*T, C, H, W)
+        inputs = inputs.view(B * T, C, H, W)
         rois.unsqueeze_(1)
-        rois = rois.repeat(1, T, 1, 1)
-        rois = rois.view(B*T*count_areas, 4)
-        rois = F.pad(rois, (1, 0))
-        for i in range(B*T*count_areas):
-            rois[i][0] = i//count_areas
+        rois = rois.repeat(1, T, 1, 1) # same roi for each T frame in one sequence
+        rois = rois.view(B * T * count_areas, 4)
+        rois = F.pad(rois, (1, 0)) # left padding for roi index
+        for i in range(B * T * count_areas):
+            rois[i][0] = i // count_areas
 
         return inputs, labels, rois

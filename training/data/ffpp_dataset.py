@@ -47,15 +47,16 @@ class FF_Dataset(data.Dataset):
     def __getitem__(self, index):
         manipulation = self.type_list[index]
         data_path = os.path.join(self.data_path, manipulation, self.video_list[index])
-        
         labels = 0 if 'Original' == manipulation else 1
                         
         frame_list = os.listdir(data_path)
         frame_list.sort(key=lambda x:int(x[:-4]))
 
         if self.random_sample:
+            # select the source video, randomly select the begin index in bboxes except the last 3 frames
             begin_index = random.choice(list(self.bboxes[self.video_list[index][:3]].keys())[:-3])
         else:
+            # Sequentially select the begin index in valid bboxes
             begin_index = self.begin_index_list[index]
 
         bbox, l_eye_bbox, r_eye_bbox, nose_bbox, mouth_bbox, *_ = self.bboxes[self.video_list[index][:3]][begin_index]

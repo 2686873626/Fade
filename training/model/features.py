@@ -10,7 +10,7 @@ class Xception_Fea(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         net = xception(num_classes=2, pretrained=False)
-        net.load_state_dict(torch.load('init_weights/xception_HQ_299.ckpt'))
+        net.load_state_dict(torch.load('/irip/tanlingfeng_2020/v2g/init_weights/xception_HQ_299.ckpt'))
         self.conv1 = nn.Sequential(
             net.conv1, net.bn1, net.relu,
             net.conv2, net.bn2, net.relu
