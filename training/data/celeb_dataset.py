@@ -56,28 +56,50 @@ class Celeb_Dataset(data.Dataset):
 
         begin_index = self.begin_index_list[index]
 
-        bbox, l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox = self.bboxes[self.video_list[index]][begin_index]
-        
-        begin_index = int(begin_index)
+        video_bboxes = self.bboxes[self.video_list[index][:3]]
+        # bbox, l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox = self.bboxes[self.video_list[index][:3]][begin_index]
 
+        begin_index = int(begin_index)
+        bbox_list = []
+
+        # select num_samples frame with interval to form list
         if self.num_samples * self.interval + begin_index < len(frame_list):
             clip_frames = frame_list[begin_index:(begin_index + self.num_samples * self.interval):self.interval]
+            for i in range(len(clip_frames)):
+                idx = begin_index + i * self.interval
+                if not str(idx) in video_bboxes:
+                    while not str(idx) in video_bboxes:
+                        idx -= 4
+                        if idx < 0:
+                            idx = begin_index
+                bbox_list.append(video_bboxes[str(idx)])
         else:
             clip_frames = frame_list[(len(frame_list) - self.num_samples * self.interval)::self.interval]
-
+            for i in range(len(clip_frames)):
+                idx = len(frame_list) - (len(frame_list) % 4) - self.num_samples * self.interval + i * self.interval
+                if not str(idx) in video_bboxes:
+                    while not str(idx) in video_bboxes:
+                        idx -= 4
+                        if idx < 0:
+                            idx = begin_index
+                bbox_list.append(video_bboxes[str(idx)])
         face_seq = []
-        
-        for frame in clip_frames:
+
+        # crop the face and execute data augmentation
+        for idx, frame in enumerate(clip_frames):
             frame_img = Image.open(os.path.join(data_path, frame))
 
-            frame_img = frame_img.crop(bbox)
+            frame_img = frame_img.crop(bbox_list[idx][0])
 
             face_img = self.to_tensor(frame_img)
             del frame_img
-                
+
             face_seq.append(face_img)
-        
-        face_seq = torch.stack(face_seq, dim=0)
-        rois = torch.tensor([l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox, [0.05, 0.05, 0.95, 0.95]]) * self.spatial_size
+
+        rois = []
+        for bbox in bbox_list:
+            rois.append(bbox[1:] + [[0.05, 0.05, 0.95, 0.95]])
+        rois = torch.tensor(rois) * self.spatial_size
+
 
         return face_seq, labels, rois
