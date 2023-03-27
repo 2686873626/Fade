@@ -44,7 +44,7 @@ class FFData(pl.LightningDataModule):
             # )
 
             self.test_set = Celeb_Dataset(
-                version='v1',
+                version='v2',
                 num_samples=8,
                 interval=3,
                 img_size=self.opt.img_size

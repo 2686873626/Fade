@@ -17,7 +17,7 @@ class Celeb_Dataset(data.Dataset):
         super().__init__()
 
         self.num_samples = num_samples
-        self.data_path = '/irip/yangruijie_2019/tanlingfeng/data/celeb_df_%s/frames'%(version)
+        self.data_path = '/irip/tanlingfeng_2020/data/celeb_df_%s/frames'%(version)
         self.to_tensor = T.Compose([
             T.ToTensor(),
             T.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD),
@@ -74,6 +74,6 @@ class Celeb_Dataset(data.Dataset):
             face_seq.append(face_img)
         
         face_seq = torch.stack(face_seq, dim=0)
-        rois = torch.tensor([l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox, [0.05, 0.05, 0.95, 0.95]])*10
+        rois = torch.tensor([l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox, [0.05, 0.05, 0.95, 0.95]]) * 10
 
         return face_seq, labels, rois

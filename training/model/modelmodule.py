@@ -5,6 +5,7 @@ from torch.nn import functional as F
 from torchmetrics.classification import Accuracy, AUROC
 from pytorch_lightning import loggers as pl_loggers
 from torchvision.utils import make_grid
+from torch.utils.tensorboard import SummaryWriter
 import sys
 
 # from .v2g import V2G
@@ -130,6 +131,7 @@ class Model(pl.LightningModule):
 
     def batch_preprocess(self, batch):
         inputs, labels, rois = batch
+        self.log_tb_images(inputs, rois)
         # inputs: batch, frame number of sequence, channel, height, width
         B, T, C, H, W = inputs.shape
         inputs = inputs.view(B * T, C, H, W)
@@ -151,7 +153,8 @@ class Model(pl.LightningModule):
                 break
 
         if tb_logger is None:
-            raise ValueError('TensorBoard Logger not found')
+            tb_logger = SummaryWriter()
+            # raise ValueError('TensorBoard Logger not found')
 
         region_name = ['l_eye_bbox', 'r_eye_bbox', 'l_cheek_bbox', 'r_cheek_bbox', 'nose_bbox', 'mouth_bbox', 'whole_face']
 
@@ -159,12 +162,13 @@ class Model(pl.LightningModule):
         for sequence_idx, sequence in enumerate(viz_images):
             roi = rois[sequence_idx]
             for frame_idx, frame in enumerate(sequence):
-                roi_frame = roi[frame_idx]
+                # roi_frame = roi[frame_idx]
                 for region_idx, region in enumerate(region_name):
-                    roi_bbox = roi_frame[region_idx]
-                    image = frame[:,int(roi_bbox[1] * frame.shape[1]):int(roi_bbox[3] * frame.shape[1]), int(roi_bbox[0] * frame.shape[2]):int(roi_bbox[2] * frame.shape[2])]
+                    roi_bbox = roi[region_idx]
+                    image = frame[:,int(max(0, roi_bbox[1]) * frame.shape[1]):int(min(1, roi_bbox[3]) * frame.shape[1]),
+                            int(max(0, roi_bbox[0]) * frame.shape[2]):int(min(1, roi_bbox[2]) * frame.shape[2])]
                     tb_logger.add_image(f"Image/Sequence:{sequence_idx}_Frame:{frame_idx}_Region{region}", image, 0)
-
+        tb_logger.close()
         sys.exit(0)
 
     def log_inter_images(self, viz_images) -> None:
