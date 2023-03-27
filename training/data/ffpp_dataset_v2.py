@@ -12,7 +12,7 @@ IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 
 
 class FF_Dataset(data.Dataset):
-    def __init__(self, list_path, data_path, num_samples=4, img_size=299, interval=2, random_sample=False):
+    def __init__(self, list_path, data_path, num_samples=4, img_size=299, interval=4, random_sample=False):
         super().__init__()
 
         self.num_samples = num_samples
@@ -26,7 +26,10 @@ class FF_Dataset(data.Dataset):
         ])
 
         self.spatial_size = 10
-        
+
+        if not self.interval % 4 == 0:
+            self.interval = self.interval - self.interval % 4
+
         with open('datasets/ffpp/bboxes_with_partial_bboxes_step_4.txt', 'r') as f:
             self.bboxes = json.load(f)
 
@@ -62,19 +65,37 @@ class FF_Dataset(data.Dataset):
             # Sequentially select the begin index in valid bboxes
             begin_index = self.begin_index_list[index]
 
-        bbox, l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox = self.bboxes[self.video_list[index][:3]][begin_index]
+        video_bboxes = self.bboxes[self.video_list[index][:3]]
+        # bbox, l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox = self.bboxes[self.video_list[index][:3]][begin_index]
 
         begin_index = int(begin_index)
+        bbox_list = []
 
         # select num_samples frame with interval to form list
         if self.num_samples * self.interval + begin_index < len(frame_list):
             clip_frames = frame_list[begin_index:(begin_index + self.num_samples * self.interval):self.interval]
+            for i in range(len(clip_frames)):
+                idx = begin_index + i * self.interval
+                if not str(idx) in video_bboxes:
+                    while not str(idx) in video_bboxes:
+                        idx -= 4
+                        if idx < 0:
+                            idx = begin_index
+                bbox_list.append(video_bboxes[str(idx)])
         else:
             clip_frames = frame_list[(len(frame_list) - self.num_samples * self.interval)::self.interval]
+            for i in range(len(clip_frames)):
+                idx = len(frame_list) - (len(frame_list) % 4) - self.num_samples * self.interval + i * self.interval
+                if not str(idx) in video_bboxes:
+                    while not str(idx) in video_bboxes:
+                        idx -= 4
+                        if idx < 0:
+                            idx = begin_index
+                bbox_list.append(video_bboxes[str(idx)])
         face_seq = []
 
         # crop the face and execute data augmentation
-        for frame in clip_frames:
+        for idx, frame in enumerate(clip_frames):
             frame_img = Image.open(os.path.join(data_path, frame))
             ori_img = Image.open(os.path.join(os.path.join(self.data_path, 'Original', self.video_list[index][:3]), frame))
             
@@ -84,7 +105,7 @@ class FF_Dataset(data.Dataset):
                 right_pad = pad - left_pad
                 frame_img = ImageOps.expand(frame_img, (left_pad, 0, right_pad, 0), 'red')
 
-            frame_img = frame_img.crop(bbox)
+            frame_img = frame_img.crop(bbox_list[idx][0])
 
             face_img = self.to_tensor(frame_img)
             del frame_img
@@ -94,18 +115,30 @@ class FF_Dataset(data.Dataset):
 
         # stack the face sequence and generate the rois
         face_seq = torch.stack(face_seq, dim=0)
-        rois = torch.tensor([l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox, [0.05, 0.05, 0.95, 0.95]]) * self.spatial_size
+
+        rois = []
+        for bbox in bbox_list:
+            rois.append(bbox[1:]+ [[0.05, 0.05, 0.95, 0.95]])
+        with open('check.json', 'w') as f:
+            json.dump(rois, f)
+        rois = torch.tensor(rois) * self.spatial_size
+
+        # rois = torch.tensor([l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox, [0.05, 0.05, 0.95, 0.95]]) * self.spatial_size
 
         # randomly reverse the sequence or horizontal flip the sequence
         if self.random_sample:
             if random.randint(1, 10) > 5:
                 face_seq = torch.flip(face_seq, [0])
+                rois = torch.flip(rois, [0])
             if random.randint(1, 10) > 5:
                 face_seq = torch.flip(face_seq, [3])
-                rois = []
-                for bbox in [r_eye_bbox, l_eye_bbox, r_cheek_bbox, l_cheek_bbox, nose_bbox, mouth_bbox, [0.05, 0.05, 0.95, 0.95]]:
-                    x1, y1, x2, y2 = bbox
-                    rois.append([1 - x2, y1, 1 - x1, y2])
-                rois = torch.tensor(rois) * self.spatial_size
+                rois[:, 0], rois[:, 1] = rois[:, 1], rois[:, 0] # swap eyes
+                rois[:, 2], rois[:, 3] = rois[:, 3], rois[:, 2] # swap cheeks
+                rois[:, :, 0], rois[:, :, 2] = 1 - rois[:, :, 2], 1 - rois[:, :, 0]
+                # for bbox in [r_eye_bbox, l_eye_bbox, r_cheek_bbox, l_cheek_bbox, nose_bbox, mouth_bbox,
+                #              [0.05, 0.05, 0.95, 0.95]]:
+                #     x1, y1, x2, y2 = bbox
+                #     rois.append([1 - x2, y1, 1 - x1, y2])
+                # rois = torch.tensor(rois) * self.spatial_size
 
         return face_seq, labels, rois
