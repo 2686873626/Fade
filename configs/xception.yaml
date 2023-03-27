@@ -1,6 +1,6 @@
 # Data settings
 data:
-  num_workers: 8
+  num_workers: 4
   train_batch_size: 4
   val_batch_size: 14
   num_samples: 8
@@ -14,7 +14,7 @@ data:
 
 # Training settings
 training:
-  resume: none
+  resume: /irip/tanlingfeng_2020/v2g/logs/PartialGCN/HQ/lightning_logs/version_5309/checkpoints/val_auc-epoch_002-loss_0.337-acc_0.97881-auc_0.99524.ckpt
   save_dir: logs/
   precision: 32
   num_epochs: 30

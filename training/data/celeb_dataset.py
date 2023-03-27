@@ -24,6 +24,7 @@ class Celeb_Dataset(data.Dataset):
             T.Resize((img_size, img_size))
         ])
         self.interval = interval
+        self.spatial_size = 10
         
         with open('datasets/celeb%s/bboxes_with_partial_bboxes_step_4.txt'%(version), 'r') as f:
             self.bboxes = json.load(f)
@@ -58,9 +59,12 @@ class Celeb_Dataset(data.Dataset):
         bbox, l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox = self.bboxes[self.video_list[index]][begin_index]
         
         begin_index = int(begin_index)
-        
-        clip_frames = frame_list[begin_index:begin_index+self.num_samples*self.interval:self.interval]
-            
+
+        if self.num_samples * self.interval + begin_index < len(frame_list):
+            clip_frames = frame_list[begin_index:(begin_index + self.num_samples * self.interval):self.interval]
+        else:
+            clip_frames = frame_list[(len(frame_list) - self.num_samples * self.interval)::self.interval]
+
         face_seq = []
         
         for frame in clip_frames:
@@ -74,6 +78,6 @@ class Celeb_Dataset(data.Dataset):
             face_seq.append(face_img)
         
         face_seq = torch.stack(face_seq, dim=0)
-        rois = torch.tensor([l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox, [0.05, 0.05, 0.95, 0.95]]) * 10
+        rois = torch.tensor([l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox, [0.05, 0.05, 0.95, 0.95]]) * self.spatial_size
 
         return face_seq, labels, rois

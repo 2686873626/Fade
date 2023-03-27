@@ -30,7 +30,7 @@ class Model(pl.LightningModule):
         self.train_acc = Accuracy(dist_sync_on_step=True)
         self.train_auc = AUROC(num_classes=2, compute_on_step=False, dist_sync_on_step=True)
         self.eval_acc = Accuracy(dist_sync_on_step=True)
-        self.eval_auc = AUROC(num_classes=2, compute_on_step=False, dist_sync_on_step=True)
+        self.eval_auc = AUROC(num_classes=2, compute_on_step=True, dist_sync_on_step=True)
 
     def forward(self, x, rois):
         return self.backbone(x, rois)
@@ -131,7 +131,7 @@ class Model(pl.LightningModule):
 
     def batch_preprocess(self, batch):
         inputs, labels, rois = batch
-        self.log_tb_images(inputs, rois)
+        # self.log_tb_images(inputs, rois)
         # inputs: batch, frame number of sequence, channel, height, width
         B, T, C, H, W = inputs.shape
         inputs = inputs.view(B * T, C, H, W)

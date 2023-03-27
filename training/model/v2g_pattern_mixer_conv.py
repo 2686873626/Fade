@@ -129,18 +129,24 @@ class PatternMixer(nn.Module):
         self.num_frame = num_frame
         self.num_nodes = _num_nodes
 
-        self.pattern_mixer = nn.ModuleList()
-        for _ in range(self.num_mixed):
-            # input: num_nodes x ((2 * num_frame - 1) x num_nodes) x num_basic
-            self.pattern_mixer.append(
-                nn.Sequential(
-                    nn.Linear(num_basic, 1),  # num_nodes x ((2 * num_frame - 1) x num_nodes) x 1
+        # self.pattern_mix = nn.ModuleList()
+        # for _ in range(self.num_mixed):
+        #     # input: num_nodes x ((2 * num_frame - 1) x num_nodes) x num_basic
+        #     self.pattern_mix.append(
+        #         nn.Sequential(
+        #             nn.Linear(num_basic, 1),  # num_nodes x ((2 * num_frame - 1) x num_nodes) x 1
+        #             Rearrange('n m h-> h n m'),  # 1 x num_nodes x ((2 * num_frame - 1) x num_nodes)
+        #             nn.ReLU(),
+        #         )
+        #     )
+        self.pattern_mix = nn.Sequential(
+                    nn.Linear(num_basic, 4),  # num_nodes x ((2 * num_frame - 1) x num_nodes) x 1
                     Rearrange('n m h-> h n m'),  # 1 x num_nodes x ((2 * num_frame - 1) x num_nodes)
                     nn.ReLU(),
                 )
-            )
 
-        self.temporal_expansion = nn.Parameter(torch.randn(num_mixed, num_basic, num_frame * 2 - 1))
+        # self.temp_extent = nn.Parameter(torch.randn(num_mixed, num_basic, num_frame * 2 - 1))
+        self.temp_extent = nn.Parameter(torch.randn(num_basic, num_frame * 2 - 1))
 
         mixed_mat = torch.zeros(
             self.num_mixed,
@@ -165,17 +171,22 @@ class PatternMixer(nn.Module):
             Tensor: num_mixed x (1 + num_nodes * num_frame) x (1 + num_nodes * num_frame)
         """
         mat_list = []
-        for i in range(self.num_mixed):
-            cur_expansion = self.temporal_expansion[i]
-            cur_expansion = torch.sigmoid(cur_expansion).squeeze(0)
-            # multiply the expansion on the channel dim for each basic pattern
-            # num_basic x (2 * num_frame - 1) x num_nodes x num_nodes
-            input_mat = einsum('b t, b n m -> b t n m', cur_expansion, mat)
-            input_mat = rearrange(input_mat,
-                                  'b t n m -> n (t m) b')  # num_nodes x ((2 * num_frame - 1) x num_nodes) x num_basic
-            mat_list.append(self.pattern_mixer[i](input_mat))  # 1 x num_nodes x ((2 * num_frame - 1) x num_nodes)
+        # for i in range(self.num_mixed):
+        #     cur_expansion = self.temp_extent[i]
+        #     cur_expansion = torch.sigmoid(cur_expansion).squeeze(0)
+        #     # multiply the expansion on the channel dim for each basic pattern
+        #     # num_basic x (2 * num_frame - 1) x num_nodes x num_nodes
+        #     input_mat = einsum('b t, b n m -> b t n m', cur_expansion, mat)
+        #     input_mat = rearrange(input_mat,
+        #                           'b t n m -> n (t m) b')  # num_nodes x ((2 * num_frame - 1) x num_nodes) x num_basic
+        #     mat_list.append(self.pattern_mix(input_mat))  # 1 x num_nodes x ((2 * num_frame - 1) x num_nodes)
 
-        mat = torch.cat(mat_list)  # num_mixed x num_nodes x ((2 * num_frame - 1) x num_nodes)
+        cur_expansion = torch.sigmoid(self.temp_extent)
+        input_mat = einsum('b t, b n m -> b t n m', cur_expansion, mat)
+        input_mat = rearrange(input_mat, 'b t n m -> n (t m) b')
+        mat = self.pattern_mix(input_mat)
+
+        # mat = torch.cat(mat_list)  # num_mixed x num_nodes x ((2 * num_frame - 1) x num_nodes)
 
         mixed_mat = self.mixed_mat.clone()
 
@@ -284,9 +295,20 @@ class MultiDepGraphModule(nn.Module):
         self.proj1 = SepConv(input_dim, 512, padding=1)
         self.proj2 = SepConv(input_dim, 512, padding=1)
 
+        # self.fusion = nn.Sequential(
+        #     nn.Conv2d(1024, 512, 1),
+        #     nn.BatchNorm2d(512),
+        #     nn.ReLU(),
+        #     nn.Dropout(),
+        #     nn.Conv2d(512, 1024, 1),
+        #     nn.BatchNorm2d(1024),
+        #     nn.ReLU(),
+        #     nn.AdaptiveAvgPool2d(1),
+        #     nn.Flatten(1)
+        # )
+
         self.fusion = nn.Sequential(
             nn.Conv2d(1024, 512, 1),
-            nn.BatchNorm2d(512),
             nn.ReLU(),
             nn.Dropout(),
             nn.Conv2d(512, 1024, 1),
