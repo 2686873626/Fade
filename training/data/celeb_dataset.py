@@ -56,7 +56,7 @@ class Celeb_Dataset(data.Dataset):
 
         begin_index = self.begin_index_list[index]
 
-        video_bboxes = self.bboxes[self.video_list[index][:3]]
+        video_bboxes = self.bboxes[self.video_list[index]]
         # bbox, l_eye_bbox, r_eye_bbox, l_cheek_bbox, r_cheek_bbox, nose_bbox, mouth_bbox = self.bboxes[self.video_list[index][:3]][begin_index]
 
         begin_index = int(begin_index)
@@ -95,7 +95,7 @@ class Celeb_Dataset(data.Dataset):
             del frame_img
 
             face_seq.append(face_img)
-
+        face_seq = torch.stack(face_seq, dim=0)
         rois = []
         for bbox in bbox_list:
             rois.append(bbox[1:] + [[0.05, 0.05, 0.95, 0.95]])
