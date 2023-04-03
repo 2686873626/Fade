@@ -63,7 +63,7 @@ def run(args, opt):
         default_root_dir=os.path.join(opt.training.save_dir, opt.training.model.model_name, opt.data.img_quality),
         # devices=len(args.gpus),
         gpus=args.gpus,
-        strategy='ddp',
+        strategy='ddp_find_unused_parameters_false',
         sync_batchnorm=True,
         precision=opt.training.precision,
         max_epochs=opt.training.num_epochs,

@@ -68,8 +68,6 @@ class ActionGCN(nn.Module):
             x (Tensor): B * num_head * (T * N + 1) * (512 / num_head) * H * W
         """
         B = x.shape[0]
-        H, M, N = A.shape
-        A = torch.broadcast_to(A, (B, H, M, N))
         # A -- B * num_head * (T * N + 1) * (T * N + 1)
         x = self.layer1(x, A)
         x = self.layer2(x, A)
@@ -262,7 +260,12 @@ class Amplified_PatternMixer(nn.Module):
         x = rearrange(x, '(b t) c -> b t c', t=num_samples * num_nodes + 1)  # B * (T * N + 1) x C
         x = torch.norm(x, dim=-1)  # B x (T x N + 1)
         x = x.unsqueeze(1)  # B x 1 x (T * N + 1)
-        x = x.repeat(1, num_samples * num_nodes + 1, 1)  # B x num_mixed x (T * N + 1)
+        x = x.repeat(1, num_samples * num_nodes + 1, 1)  # B x (T * N + 1) x (T * N + 1)
+        x = x.unsqueeze(1)  # B x 1 x (T * N + 1) x (T * N + 1)
+        x = x.repeat(1, mixed_pattern.shape[0], 1, 1)  # B x num_mixed x (T * N + 1) x (T * N + 1)
+        H, M, N = mixed_pattern.shape
+        mixed_pattern = torch.broadcast_to(mixed_pattern, (x.shape[0], H, M, N)) # B x num_mixed x (T * N + 1) x (T * N + 1)
+        return mixed_pattern + self.alpha * x
 
 
 class PatternMixer(nn.Module):
@@ -418,7 +421,7 @@ class MultiDepGraphModule(nn.Module):
         # basic_patterns -> num_basic * num_nodes * num_nodes
         basic_patterns = get_basic_patterns(num_nodes=num_nodes, num_basic=5)
         self.register_buffer('basic_patterns', basic_patterns)
-        self.pattern_mixer = PatternMixer(num_basic=5, num_frame=num_samples, _num_nodes=num_nodes,
+        self.pattern_mixer = Amplified_PatternMixer(num_basic=5, num_frame=num_samples, _num_nodes=num_nodes,
                                           num_mixed=self.num_head)
 
         self.master_node = nn.Parameter(torch.randn(1, 1, input_dim, 3, 3))
