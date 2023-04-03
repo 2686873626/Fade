@@ -4,10 +4,10 @@ data:
   train_batch_size: 4
   val_batch_size: 14
   num_samples: 8
-  interval: 16
+  interval: 8
   data_path: /irip/tanlingfeng_2020/data/ff++/frames
   list_path: datasets/ffpp
-  img_quality: LQ
+  img_quality: HQ
   img_size: 320
   random_sample: True
 
@@ -45,5 +45,5 @@ training:
   
   # Model settings
   model:
-    model_name: V2G
+    model_name: Reverse
     num_classes: 2

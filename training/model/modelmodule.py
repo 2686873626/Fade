@@ -27,7 +27,7 @@ class Model(pl.LightningModule):
         self.criterion = torch.nn.CrossEntropyLoss()
 
         self.train_acc = Accuracy(dist_sync_on_step=True)
-        self.train_auc = AUROC(num_classes=2, compute_on_step=False, dist_sync_on_step=True)
+        # self.train_auc = AUROC(num_classes=2, compute_on_step=False, dist_sync_on_step=True)
         self.eval_acc = Accuracy(dist_sync_on_step=True)
         self.eval_auc = AUROC(num_classes=2, compute_on_step=False, dist_sync_on_step=True)
 
@@ -39,12 +39,17 @@ class Model(pl.LightningModule):
         preds = self(inputs, rois)
         loss = self.criterion(preds, targets)
         self.train_acc(preds, targets)
-        self.train_auc(preds, targets)
+        # self.train_auc(preds, targets)
         self.log_dict(
-            {'train/acc':self.train_acc, 'train/auc':self.train_auc},
+            {'train/acc':self.train_acc},
             on_step=False, on_epoch=True, sync_dist=True,
             rank_zero_only=True
         )
+        # self.log_dict(
+        #     {'train/acc':self.train_acc, 'train/auc':self.train_auc},
+        #     on_step=False, on_epoch=True, sync_dist=True,
+        #     rank_zero_only=True
+        # )
         self.log('train/loss', loss,
             on_step=True, on_epoch=True, sync_dist=True,
             rank_zero_only=True
@@ -133,8 +138,8 @@ class Model(pl.LightningModule):
         # inputs: batch, frame number of sequence, channel, height, width
         B, T, C, H, W = inputs.shape
         inputs = inputs.view(B * T, C, H, W)
-        rois.unsqueeze_(1)
-        rois = rois.repeat(1, T, 1, 1) # same roi for each T frame in one sequence
+        # rois.unsqueeze_(1)
+        # rois = rois.repeat(1, T, 1, 1) # same roi for each T frame in one sequence
         rois = rois.view(B * T * count_areas, 4)
         rois = F.pad(rois, (1, 0)) # left padding for roi index
         for i in range(B * T * count_areas):
