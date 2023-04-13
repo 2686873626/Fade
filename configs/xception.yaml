@@ -7,9 +7,10 @@ data:
   interval: 8
   data_path: /irip/tanlingfeng_2020/data/ff++/frames
   list_path: datasets/ffpp
-  img_quality: HQ
+  img_quality: LQ
   img_size: 320
   random_sample: True
+  augment: False
 
 
 # Training settings

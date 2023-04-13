@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms as T
 from typing import Optional
 
+from .ffpp_dataset_frame import FF_Frame_Dataset, FF_Frame_Test_Dataset
 from .ffpp_dataset_v2 import FF_Dataset
 from .celeb_dataset import Celeb_Dataset
 
@@ -18,13 +19,27 @@ class FFData(pl.LightningDataModule):
 
     def setup(self, stage: Optional[str] = None):
         if stage in (None, 'fit'):
+            # self.train_set = FF_Frame_Dataset(
+            #     data_path=os.path.join(self.opt.data_path, self.opt.img_quality),
+            #     frame_per_video=self.opt.frame_per_video,
+            #     img_size=self.opt.img_size,
+            #     stage='train',
+            # )
+            # self.val_set = FF_Frame_Dataset(
+            #     data_path=os.path.join(self.opt.data_path, self.opt.img_quality),
+            #     frame_per_video=self.opt.frame_per_video,
+            #     img_size=self.opt.img_size,
+            #     stage='val',
+            # )
             self.train_set = FF_Dataset(
                 list_path=os.path.join(self.opt.list_path, 'train.txt'),
                 data_path=os.path.join(self.opt.data_path, self.opt.img_quality),
                 num_samples=self.opt.num_samples,
                 interval=self.opt.interval,
                 img_size=self.opt.img_size,
-                random_sample=self.opt.random_sample
+                random_sample=self.opt.random_sample,
+                augment=self.opt.augment,
+                phase='train',
             )
             self.val_set = FF_Dataset(
                 list_path=os.path.join(self.opt.list_path, 'test_all.txt'),
@@ -32,6 +47,7 @@ class FFData(pl.LightningDataModule):
                 num_samples=self.opt.num_samples,
                 interval=self.opt.interval,
                 img_size=self.opt.img_size,
+                phase='val',
             )
             
         if stage in (None, 'test'):
@@ -41,14 +57,20 @@ class FFData(pl.LightningDataModule):
             #     num_samples=self.opt.num_samples,
             #     interval=self.opt.interval,
             #     img_size=self.opt.img_size,
+            #     phase='test',
             # )
 
             self.test_set = Celeb_Dataset(
                 version='v1',
                 num_samples=8,
                 interval=3,
-                img_size=self.opt.img_size
+                img_size=self.opt.img_size,
             )
+            # self.test_set = FF_Frame_Test_Dataset(
+            #     data_path=os.path.join(self.opt.data_path, self.opt.img_quality),
+            #     frame_per_video=self.opt.frame_per_video,
+            #     img_size=self.opt.img_size
+            # )
     
     def train_dataloader(self):
         return DataLoader(

@@ -6,19 +6,45 @@ import json
 
 from PIL import Image, ImageOps
 from torchvision import transforms as T
+from albumentations import *
+import numpy as np
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 
 
 class FF_Dataset(data.Dataset):
-    def __init__(self, list_path, data_path, num_samples=4, img_size=299, interval=4, random_sample=False):
+    def __init__(self, list_path, data_path, num_samples=4, img_size=299, interval=4, random_sample=False,
+                 augment=False, phase='train'):
         super().__init__()
 
         self.num_samples = num_samples
         self.data_path = data_path
         self.random_sample = random_sample
         self.interval = interval
+        self.phase = phase
+        self.augment = augment
+
+        self.aug = Compose([OneOf([
+                                Blur(),
+                                MotionBlur(),
+                                GaussianBlur(),
+                                GlassBlur(),
+                            ], p=0.2),
+                            OneOf([
+                                ColorJitter(),
+                                RandomBrightnessContrast(),
+                                HueSaturationValue(),
+                                CLAHE(),
+                                RandomGamma(),
+                            ], p=0.2),
+                            OneOf([
+                                ChannelDropout(),
+                                ToGray(),
+                            ], p=0.2),
+                            GaussNoise(p=0.2), CoarseDropout(p=0.2)], p=1.0)
+
+
         self.to_tensor = T.Compose([
             T.ToTensor(),
             T.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD),
@@ -106,7 +132,8 @@ class FF_Dataset(data.Dataset):
                 frame_img = ImageOps.expand(frame_img, (left_pad, 0, right_pad, 0), 'red')
 
             frame_img = frame_img.crop(bbox_list[idx][0])
-
+            if self.phase == 'train' and self.augment:
+                frame_img = self.aug(image=np.array(frame_img))['image']
             face_img = self.to_tensor(frame_img)
             del frame_img
             del ori_img

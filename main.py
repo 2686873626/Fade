@@ -10,7 +10,7 @@ import os
 from omegaconf import OmegaConf as OC
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from training.model import Model
+from training.model import Model, BackboneModel
 from training.data import FFData
 
 
@@ -52,7 +52,10 @@ def get_callbacks():
 
 def run(args, opt):
     pl.seed_everything(args.seed, workers=True)
-    model = Model(opt.data, opt.training)
+    if opt.training.model.model_name == 'Backbone':
+        model = BackboneModel(opt.data, opt.training)
+    else:
+        model = Model(opt.data, opt.training)
     # model.load_state_dict(torch.load('logs/PartialGCN/LQ/lightning_logs/version_5290/checkpoints/val_acc-epoch_009-loss_0.377-acc_0.93119-auc_0.94736.ckpt', map_location='cpu')['state_dict'], False)
     # torch.save(model.backbone.backbone.state_dict(), 'effnet_b4_320_LQ.ckpt')
     # return 0

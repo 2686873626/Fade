@@ -69,6 +69,8 @@ class ActionGCN(nn.Module):
         """
         B = x.shape[0]
         # A -- B * num_head * (T * N + 1) * (T * N + 1)
+        H, M, N = A.shape
+        A = torch.broadcast_to(A, (B, H, M, N))
         x = self.layer1(x, A)
         x = self.layer2(x, A)
         # node -> whole face node -> master node
@@ -105,13 +107,13 @@ class ContentGCN(nn.Module):
         Returns:
             Tensor: B x H x N x C x h x w
         """
-        vec = self.pool(x).squeeze()  # B x H x N x C
+        vec = self.pool(x).squeeze(1)  # B x H x N x C
         vec_norm = F.normalize(vec, dim=-1)  # B x H x N x C
         A = vec_norm @ (vec_norm.transpose(-1, -2))  # B x H x N x N
         A = torch.softmax(A / self.alpha1 + self.bias1, -1)  # B x H x N x N
         x = self.layer1(x, A)  # B x H x N x C x h x w
 
-        vec = self.pool(x).squeeze()
+        vec = self.pool(x).squeeze(1)
         vec_norm = F.normalize(vec, dim=-1)
         A = vec_norm @ (vec_norm.transpose(-1, -2))
         A = torch.softmax(A / self.alpha2 + self.bias2, -1)
@@ -121,7 +123,7 @@ class ContentGCN(nn.Module):
 
 
 class ReverseContentGCN(nn.Module):
-    def __init__(self, dim=512):
+    def __init__(self, dim=512, topk=3):
         super().__init__()
         self.layer_inter_frame = ConvIter()
         self.layer_to_master_1 = ConvIter()
@@ -139,8 +141,10 @@ class ReverseContentGCN(nn.Module):
 
         self.bias_inter_frame = nn.Parameter(torch.zeros(num_nodes, num_nodes))
         self.bias_to_master_1 = nn.Parameter(torch.zeros(1, 1 + num_samples * num_nodes))
-        self.bias_reverse = nn.Parameter(torch.zeros(num_nodes, 4 * num_nodes))
+        self.bias_reverse = nn.Parameter(torch.zeros(num_nodes, 3 * num_nodes))
         self.bias_to_master_2 = nn.Parameter(torch.zeros(1, 1 + num_samples * num_nodes))
+
+        self.topk = topk
 
     def forward(self, x):
         """
@@ -153,12 +157,12 @@ class ReverseContentGCN(nn.Module):
         """
         # separate master node and normal nodes
         normal_x = x[:, :, 1:, :, :, :].clone()  # B x H x (T x N) x C x h x w
-        master_x = x[:, :, 0, :, :, :].clone().unsqueeze(2)   # B x H x 1 x C x h x w
+        master_x = x[:, :, 0, :, :, :].clone().unsqueeze(2)  # B x H x 1 x C x h x w
         # return master_x.squeeze()
 
         # Graph GCN in frames
         normal_x = rearrange(normal_x, 'b h (t d) c i j -> (b t) h d c i j', t=num_samples,
-                           d=num_nodes)  # (B x T) x H x N x C x h x w
+                             d=num_nodes)  # (B x T) x H x N x C x h x w
         vec = self.pool(normal_x).squeeze()  # (B x T) x H x N x C
         vec_norm = F.normalize(vec, dim=-1)  # (B x T) x H x N x C
         A = vec_norm @ (vec_norm.transpose(-1, -2))  # (B x T) x H x N x N
@@ -167,7 +171,7 @@ class ReverseContentGCN(nn.Module):
 
         # update master node
         temp_normal_x = rearrange(normal_x, '(b t) h d c i j -> b h (t d) c i j', t=num_samples,
-                            d=num_nodes)  # B x H x (T x N) x C x h x w
+                                  d=num_nodes)  # B x H x (T x N) x C x h x w
         all_node = torch.cat([master_x, temp_normal_x], dim=2)  # B x H x (T x N + 1) x C x h x w
         vec = self.pool(all_node).squeeze()  # B x H x (T x N + 1) x C
         vec_norm = F.normalize(vec, dim=-1)  # B x H x (T x N + 1) x C
@@ -184,23 +188,32 @@ class ReverseContentGCN(nn.Module):
 
         # Get 3 Lowest Similarity Nodes
         temp_normal_x = rearrange(normal_x, '(b t) h d c i j -> b h t d c i j', t=num_samples,
-                           d=num_nodes)  # B x H x T x N x C x h x w
+                                  d=num_nodes)  # B x H x T x N x C x h x w
         main_normal_x = temp_normal_x[:, :, :, -1, :, :, :]  # B x H x T x C x h x w (main node)
         main_vec = self.pool(main_normal_x).squeeze()  # B x H x T x C
         main_vec_norm = F.normalize(main_vec, dim=-1)  # B x H x T x C
         A = main_vec_norm @ (main_vec_norm.transpose(-1, -2))  # B x H x T x T
-        indices = torch.topk(A, 3, dim=-1, largest=False, sorted=False).indices  # B x H x T x 3
-        different_nodes = self.lowest_gather(temp_normal_x, indices)  # (B x T) x H x (4 x N) x C x h x w
+        indices = torch.topk(A, self.topk, dim=-1, largest=False, sorted=False).indices  # B x H x T x 3
+
+        B, H, T, N, C, h, w = temp_normal_x.shape
+        select_normal_x = temp_normal_x.unsqueeze(3)  # B x H x T x 1 x N x C x h x w
+        select_normal_x = select_normal_x.expand(-1, -1, -1, T, -1, -1, -1, -1)  # B x H x T x T x N x C x h x w
+        select_normal_x = torch.gather(select_normal_x, 3,
+                                       indices.view(B, H, T, self.topk, 1, 1, 1, 1).expand(-1, -1, -1, -1, N, C, h,
+                                                                                           w))  # B x H x T x 3 x N x C x h x w
+        different_nodes = rearrange(select_normal_x, 'b h t n d c i j -> (b t) h (n d) c i j', n=3,
+                                    d=N)  # (B x T) x H x (3 x N) x C x h x w
+        # different_nodes = self.lowest_gather(temp_normal_x, indices)  # (B x T) x H x (4 x N) x C x h x w
 
         # reverse sparse GCN
-        vec_diff = self.pool(different_nodes).squeeze()  # (B x T) x H x (4 x N) x C
-        vec_diff_norm = F.normalize(vec_diff, dim=-1)  # (B x T) x H x (4 x N) x C
+        vec_diff = self.pool(different_nodes).squeeze()  # (B x T) x H x (3 x N) x C
+        vec_diff_norm = F.normalize(vec_diff, dim=-1)  # (B x T) x H x (3 x N) x C
         vec_ori = self.pool(normal_x).squeeze()  # B x H x T x N x C
         vec_ori_norm = F.normalize(vec_ori, dim=-1)  # (B x T) x H x N x C
-        A = vec_ori_norm @ (vec_diff_norm.transpose(-1, -2))  # (B x T) x H x N x (4 x N)
+        A = vec_ori_norm @ (vec_diff_norm.transpose(-1, -2))  # (B x T) x H x N x (3 x N)
         A = -1 * A  # Reverse !!!!!!!!!!!!!
-        A = torch.softmax(A / self.alpha_reverse + self.bias_reverse, -1)  # (B x T) x H x N x (4 x N)
-        normal_x = self.layer_reverse(different_nodes, A)  # (B x T) x H x N x C x h x w
+        A = torch.softmax(A / self.alpha_reverse + self.bias_reverse, -1)  # (B x T) x H x N x (3 x N)
+        normal_x = self.layer_reverse(different_nodes, A) + normal_x # (B x T) x H x N x C x h x w  Skip Connection
 
         # update master node
         temp_normal_x = rearrange(normal_x, '(b t) h d c i j -> b h (t d) c i j', t=num_samples,
@@ -225,23 +238,6 @@ class ReverseContentGCN(nn.Module):
         x = self.pooling(x)
         x = rearrange(x, '(b h n) d i j -> b h n (d i j)', h=H, n=N)
         return x
-
-    def lowest_gather(self, x, indices):
-        '''
-
-        :param x: B x H x T x N x C x h x w
-        :param indices: B x H x T x 3
-        :return:
-        '''
-        B, H, T, N, C, h, w = x.shape
-        output = torch.zeros([B, H, T, 4, N, C, h, w], device=x.device)
-        for b in range(B):
-            for h in range(H):
-                for t in range(T):
-                    for n in range(3):
-                        output[b, h, t, n, :, :, :, :] = x[b, h, indices[b, h, t, n], :, :, :, :]
-                    output[b, h, t, 3, :, :, :, :] = x[b, h, t, :, :, :, :] # self attention
-        return rearrange(output, 'b h t n d c i j -> (b t) h (n d) c i j')
 
 class Amplified_PatternMixer(nn.Module):
     def __init__(self, num_basic=5, num_frame=8, _num_nodes=7, num_mixed=4):
@@ -421,13 +417,13 @@ class MultiDepGraphModule(nn.Module):
         # basic_patterns -> num_basic * num_nodes * num_nodes
         basic_patterns = get_basic_patterns(num_nodes=num_nodes, num_basic=5)
         self.register_buffer('basic_patterns', basic_patterns)
-        self.pattern_mixer = Amplified_PatternMixer(num_basic=5, num_frame=num_samples, _num_nodes=num_nodes,
+        self.pattern_mixer = PatternMixer(num_basic=5, num_frame=num_samples, _num_nodes=num_nodes,
                                           num_mixed=self.num_head)
 
         self.master_node = nn.Parameter(torch.randn(1, 1, input_dim, 3, 3))
 
         self.gcn1 = ActionGCN()
-        self.gcn2 = ReverseContentGCN()
+        self.gcn2 = ContentGCN()
 
         self.proj1 = SepConv(input_dim, 512, padding=1)
         self.proj2 = SepConv(input_dim, 512, padding=1)
@@ -482,12 +478,12 @@ class MultiDepGraphModule(nn.Module):
         x2 = self.gcn2(x2)  # B x H x C x h x w
 
         # Reverse Content Branch
-        x2 = rearrange(x2, 'b h c i j -> b (h c) i j', h=self.num_head)
+        # x2 = rearrange(x2, 'b h c i j -> b (h c) i j', h=self.num_head)
 
         # Content Branch
-        # x2 = rearrange(x2, 'b h n d i j -> b n (h d) i j', h=self.num_head)
-        # # master node x2 -- B * 512 * H * W
-        # x2 = x2[:, 0]
+        x2 = rearrange(x2, 'b h n d i j -> b n (h d) i j', h=self.num_head)
+        # master node x2 -- B * 512 * H * W
+        x2 = x2[:, 0]
 
         # Fusion
         x = self.fusion(torch.cat([x1, x2], dim=1))
