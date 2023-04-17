@@ -1,5 +1,6 @@
 import sys
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 import random
@@ -50,11 +51,12 @@ class ConvIter(nn.Module):
 
 
 class ActionGCN(nn.Module):
-    def __init__(self):
+    def __init__(self, amplified=False):
         super().__init__()
 
         self.layer1 = ConvIter()
         self.layer2 = ConvIter()
+        self.amp = amplified
 
     def forward(self, x, A):
         """Action GCN Forward
@@ -67,10 +69,12 @@ class ActionGCN(nn.Module):
             FloatTensor: x after massage passing
             x (Tensor): B * num_head * (T * N + 1) * (512 / num_head) * H * W
         """
+
         B = x.shape[0]
         # A -- B * num_head * (T * N + 1) * (T * N + 1)
-        H, M, N = A.shape
-        A = torch.broadcast_to(A, (B, H, M, N))
+        if not self.amp:
+            H, M, N = A.shape
+            A = torch.broadcast_to(A, (B, H, M, N))
         x = self.layer1(x, A)
         x = self.layer2(x, A)
         # node -> whole face node -> master node
@@ -129,6 +133,7 @@ class ReverseContentGCN(nn.Module):
         self.layer_to_master_1 = ConvIter()
         self.layer_reverse = ConvIter()
         self.layer_to_master_2 = ConvIter()
+        self.topk = topk
 
         self.transform = SepConv(dim, dim, padding=1)
 
@@ -141,10 +146,8 @@ class ReverseContentGCN(nn.Module):
 
         self.bias_inter_frame = nn.Parameter(torch.zeros(num_nodes, num_nodes))
         self.bias_to_master_1 = nn.Parameter(torch.zeros(1, 1 + num_samples * num_nodes))
-        self.bias_reverse = nn.Parameter(torch.zeros(num_nodes, 3 * num_nodes))
+        self.bias_reverse = nn.Parameter(torch.zeros(num_nodes, self.topk * num_nodes))
         self.bias_to_master_2 = nn.Parameter(torch.zeros(1, 1 + num_samples * num_nodes))
-
-        self.topk = topk
 
     def forward(self, x):
         """
@@ -201,7 +204,7 @@ class ReverseContentGCN(nn.Module):
         select_normal_x = torch.gather(select_normal_x, 3,
                                        indices.view(B, H, T, self.topk, 1, 1, 1, 1).expand(-1, -1, -1, -1, N, C, h,
                                                                                            w))  # B x H x T x 3 x N x C x h x w
-        different_nodes = rearrange(select_normal_x, 'b h t n d c i j -> (b t) h (n d) c i j', n=3,
+        different_nodes = rearrange(select_normal_x, 'b h t n d c i j -> (b t) h (n d) c i j', n=self.topk,
                                     d=N)  # (B x T) x H x (3 x N) x C x h x w
         # different_nodes = self.lowest_gather(temp_normal_x, indices)  # (B x T) x H x (4 x N) x C x h x w
 
@@ -213,7 +216,7 @@ class ReverseContentGCN(nn.Module):
         A = vec_ori_norm @ (vec_diff_norm.transpose(-1, -2))  # (B x T) x H x N x (3 x N)
         A = -1 * A  # Reverse !!!!!!!!!!!!!
         A = torch.softmax(A / self.alpha_reverse + self.bias_reverse, -1)  # (B x T) x H x N x (3 x N)
-        normal_x = self.layer_reverse(different_nodes, A) + normal_x # (B x T) x H x N x C x h x w  Skip Connection
+        normal_x = self.layer_reverse(different_nodes, A) + normal_x  # (B x T) x H x N x C x h x w  Skip Connection
 
         # update master node
         temp_normal_x = rearrange(normal_x, '(b t) h d c i j -> b h (t d) c i j', t=num_samples,
@@ -239,12 +242,14 @@ class ReverseContentGCN(nn.Module):
         x = rearrange(x, '(b h n) d i j -> b h n (d i j)', h=H, n=N)
         return x
 
+
 class Amplified_PatternMixer(nn.Module):
-    def __init__(self, num_basic=5, num_frame=8, _num_nodes=7, num_mixed=4):
+    def __init__(self, num_basic=5, num_frame=8, _num_nodes=7, num_mixed=4, gaussian=True):
         super().__init__()
-        self.pattern_mixer = PatternMixer(num_basic=num_basic, num_frame=num_frame, _num_nodes=_num_nodes, num_mixed=num_mixed)
+        self.pattern_mixer = PatternMixer(num_basic=num_basic, num_frame=num_frame, _num_nodes=_num_nodes,
+                                          num_mixed=num_mixed, gaussian=gaussian)
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.alpha = nn.Parameter(torch.ones(1))
+        self.alpha = nn.Parameter(torch.ones(num_mixed).view(1, num_mixed, 1, 1))
 
     def forward(self, mat, x):
         '''
@@ -260,17 +265,19 @@ class Amplified_PatternMixer(nn.Module):
         x = x.unsqueeze(1)  # B x 1 x (T * N + 1) x (T * N + 1)
         x = x.repeat(1, mixed_pattern.shape[0], 1, 1)  # B x num_mixed x (T * N + 1) x (T * N + 1)
         H, M, N = mixed_pattern.shape
-        mixed_pattern = torch.broadcast_to(mixed_pattern, (x.shape[0], H, M, N)) # B x num_mixed x (T * N + 1) x (T * N + 1)
+        mixed_pattern = torch.broadcast_to(mixed_pattern,
+                                           (x.shape[0], H, M, N))  # B x num_mixed x (T * N + 1) x (T * N + 1)
         return mixed_pattern + self.alpha * x
 
 
 class PatternMixer(nn.Module):
-    def __init__(self, num_basic=5, num_mixed=4, num_frame=8, _num_nodes=7):
+    def __init__(self, num_basic=5, num_mixed=4, num_frame=8, _num_nodes=7, gaussian=False):
         super().__init__()
         self.num_basic = num_basic
         self.num_mixed = num_mixed
         self.num_frame = num_frame
         self.num_nodes = _num_nodes
+        self.gaussian = gaussian
 
         self.pattern_mixer = nn.ModuleList()
         for _ in range(self.num_mixed):
@@ -283,7 +290,14 @@ class PatternMixer(nn.Module):
                 )
             )
 
-        self.temporal_expansion = nn.Parameter(torch.randn(num_mixed, num_basic, num_frame * 2 - 1))
+        # gaussian prior
+        if self.gaussian:
+            self.sigma = nn.Parameter(torch.ones(num_mixed, num_basic, 1))
+            distance = torch.arange(num_frame * 2 - 1).float()
+            distance = torch.abs(distance - (num_frame - 1))
+            self.register_buffer('distance', distance)
+        else:
+            self.temporal_expansion = nn.Parameter(torch.randn(num_mixed, num_basic, num_frame * 2 - 1))
 
         mixed_mat = torch.zeros(
             self.num_mixed,
@@ -308,6 +322,10 @@ class PatternMixer(nn.Module):
             Tensor: num_mixed x (1 + num_nodes * num_frame) x (1 + num_nodes * num_frame)
         """
         mat_list = []
+        if self.gaussian:
+            self.temporal_expansion = 1.0 / (np.sqrt(2 * np.pi) * self.sigma) * torch.exp(
+                -self.distance ** 2 / (2 * self.sigma ** 2))
+
         for i in range(self.num_mixed):
             cur_expansion = self.temporal_expansion[i]
             cur_expansion = torch.sigmoid(cur_expansion).squeeze(0)
@@ -349,66 +367,6 @@ class PatternMixer(nn.Module):
         return ret
 
 
-# class PatternMixer(nn.Module):
-#     def __init__(self, num_basic=5, num_mixed=4, num_frame=8, num_nodes=5):
-#         super().__init__()
-#         self.num_basic = num_basic
-#         self.num_mixed = num_mixed
-#         self.num_frame = num_frame
-#         self.num_nodes = num_nodes
-
-#         self.temp_extent = nn.Parameter(torch.randn(num_basic, num_frame*2-1), requires_grad=True)
-
-#         self.pattern_mix = nn.Sequential(
-#             nn.Linear(num_basic, num_mixed),
-#             Rearrange('m n h -> h n m'),
-#             nn.ReLU()
-#         )
-
-#         mixed_mat = torch.zeros(
-#             self.num_mixed,
-#             1+self.num_nodes*self.num_frame,
-#             1+self.num_nodes*self.num_frame
-#         )
-#         mixed_mat[:, 0::7, 0::7]=1.0
-#         self.register_buffer('mixed_mat', mixed_mat)
-#         self.register_buffer('degree_mat', torch.zeros_like(mixed_mat))
-
-#     def forward(self, mat):
-#         """Mix the basic pattern
-
-#         Args:
-#             mat (Tensor): Hxnxn
-
-#         Returns:
-#             Tensor: HxNxN
-#         """     
-#         # temp_extent = F.relu(self.temp_extent)
-#         temp_extent = torch.sigmoid(self.temp_extent)+1
-#         mat = einsum('h t, h n m -> h t m n', temp_extent, mat)
-
-#         mat = rearrange(mat, 'h t m n -> (t m) n h')
-#         mat = F.relu(mat)
-#         mat = self.pattern_mix(mat)
-
-#         mixed_mat = self.mixed_mat.clone()
-
-#         for i in range(num_samples):
-#             mixed_mat[ :, 1+i*self.num_nodes:1+(i+1)*self.num_nodes, 1:] \
-#                     = mat[..., self.num_nodes*(num_samples-1-i):self.num_nodes*(num_samples*2-1-i)]
-
-#         deg_mat = self.degree_mat.clone()
-#         for i in range(1+num_samples*num_nodes):
-#             deg_mat[:, i, i] = torch.pow(mixed_mat[:, i].sum(dim=1).clamp_(min=1.0), -0.5)
-
-#         norm = deg_mat
-#         ret = norm@mixed_mat@norm
-
-#         # torch.save(ret.cpu(), 'mix_pattern.pt')
-
-#         return ret
-
-
 class MultiDepGraphModule(nn.Module):
     def __init__(self, input_dim=2048, num_head=4):
         super().__init__()
@@ -417,13 +375,13 @@ class MultiDepGraphModule(nn.Module):
         # basic_patterns -> num_basic * num_nodes * num_nodes
         basic_patterns = get_basic_patterns(num_nodes=num_nodes, num_basic=5)
         self.register_buffer('basic_patterns', basic_patterns)
-        self.pattern_mixer = PatternMixer(num_basic=5, num_frame=num_samples, _num_nodes=num_nodes,
-                                          num_mixed=self.num_head)
+        self.pattern_mixer = Amplified_PatternMixer(num_basic=5, num_frame=num_samples, _num_nodes=num_nodes,
+                                                    num_mixed=self.num_head, gaussian=False)
 
         self.master_node = nn.Parameter(torch.randn(1, 1, input_dim, 3, 3))
 
-        self.gcn1 = ActionGCN()
-        self.gcn2 = ContentGCN()
+        self.gcn1 = ActionGCN(amplified=True)
+        self.gcn2 = ReverseContentGCN()
 
         self.proj1 = SepConv(input_dim, 512, padding=1)
         self.proj2 = SepConv(input_dim, 512, padding=1)
@@ -457,7 +415,9 @@ class MultiDepGraphModule(nn.Module):
 
         # Action Graph
         # mixed_patterns -- Mixed_Pattern_num * (T * N + 1) * (T * N + 1)
-        mixed_patterns = self.pattern_mixer(self.basic_patterns)
+        # mixed_patterns = self.pattern_mixer(self.basic_patterns)
+        mixed_patterns = self.pattern_mixer(self.basic_patterns, x)  # amplify the patterns
+        print(mixed_patterns.shape)
 
         # x1 -- [B * (T * N + 1)] * 512 * H * W
         x1 = self.proj1(x)
@@ -478,12 +438,12 @@ class MultiDepGraphModule(nn.Module):
         x2 = self.gcn2(x2)  # B x H x C x h x w
 
         # Reverse Content Branch
-        # x2 = rearrange(x2, 'b h c i j -> b (h c) i j', h=self.num_head)
+        x2 = rearrange(x2, 'b h c i j -> b (h c) i j', h=self.num_head)
 
         # Content Branch
-        x2 = rearrange(x2, 'b h n d i j -> b n (h d) i j', h=self.num_head)
-        # master node x2 -- B * 512 * H * W
-        x2 = x2[:, 0]
+        # x2 = rearrange(x2, 'b h n d i j -> b n (h d) i j', h=self.num_head)
+        # # master node x2 -- B * 512 * H * W
+        # x2 = x2[:, 0]
 
         # Fusion
         x = self.fusion(torch.cat([x1, x2], dim=1))
